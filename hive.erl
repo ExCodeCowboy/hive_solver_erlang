@@ -3,7 +3,7 @@
 
 start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 	
-	BeeLifetime = 1000,
+	BeeLifetime = 60,
 	NumActive = 30,
 	NumScouts = 20,
 	NumInactive = 10,
@@ -25,16 +25,20 @@ start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 
 	HivePid = spawn(HiveStart),
 
-	lists:map(fun(A)->
-		BeeSol = RanSolFunc(),
-		bee(HivePid,
-	     	BeeSol,
-	     	EvalFunc(BeeSol),
-		 	inactive,
-		 	NeighborFunc,
-		 	RanSolFunc,
-			EvalFunc,
-			BeeLifetime) end,lists:seq(1, 100)),
+	lists:map(
+		fun(A)->
+			BeeSol = RanSolFunc(),
+			spawn(
+				fun()->bee(HivePid,
+			     	BeeSol,
+			     	EvalFunc(BeeSol),
+				 	inactive,
+				 	NeighborFunc,
+				 	RanSolFunc,
+					EvalFunc,
+					BeeLifetime)
+				end) 
+		end,lists:seq(1, 100)),
 	receive
 		{solution,Solution}->
 			io:format("Finishing Hive run.")
@@ -88,12 +92,12 @@ run_hive(EvalFunc,
 						ShortCall(BestSolution,
 								 BestSolutionScore,
 								 queue:in(BeePid,RemainingInactive),
-								 TotalBees);						
+								 LivingBees);						
 					{empty,RemainingInactive} ->
 						ShortCall(BestSolution,
 								 BestSolutionScore,
 								 queue:in(BeePid,RemainingInactive),
-								 TotalBees)
+								 LivingBees)
 				end;
 			{dead,BeePid} ->
 				RemainingBees = LivingBees-1,
@@ -130,13 +134,71 @@ bee(HivePid,
 				EvalFunc,
 				LifeTime-1)
 		end,
-
+	
+	BeePid = self(),
+	
 	if LifeTime == 0 ->
-		HivePid ! {dead,self()};
+		HivePid ! {dead,BeePid};
 	true ->
-		ShortCall(BestSolution,
-			      BestSolutionScore,
-			      State)
+		case State of
+			{active,RemainingIterations}->
+				if RemainingIterations == 0 ->
+					%signal the hive you are coming home
+					HivePid!{comingHome,BeePid},
+					%then go inactive
+					ShortCall(
+						BestSolution,
+						BestSolutionScore,
+						inactive);
+				true->
+					%try neighboor
+					Neighbor = NeighborFunc(BestSolution),
+					NeighborScore = EvalFunc(Neighbor),
+					%if neghbor is better
+					if NeighborScore>BestSolutionScore->
+						%need to insert possible mistakes that bee makes
+						HivePid!{newBest, BeePid, Neighbor, NeighborScore},
+						ShortCall(Neighbor,
+								  NeighborScore,
+								  {active,RemainingIterations-1});
+					true->
+						ShortCall(BestSolution,
+								  BestSolutionScore,
+								  {active,RemainingIterations-1})
+					end
+				end;
+			inactive->
+				receive
+					{forage}->
+						ShortCall(BestSolution,
+							BestSolutionScore,
+							{active,100});
+					{newBest,BeeBest,BeeBestScore}->
+						ShortCall(BeeBest,
+							BeeBestScore,
+							inactive)
+				after 500->
+					ShortCall(BestSolution,
+							BestSolutionScore,
+							inactive)
+				end;
+			scouting->
+				%try neighboor
+				RanSol = RanSolFunc(),
+				RanSolScore = EvalFunc(RanSol),
+				%if neghbor is better
+				if RanSolScore>BestSolutionScore->
+					%need to insert possible mistakes that bee makes
+					HivePid!{newBest, BeePid, RanSol, RanSolScore},
+					ShortCall(RanSol,
+							  RanSolScore,
+							  scouting);
+				true->
+					ShortCall(BestSolution,
+							  BestSolutionScore,
+							  scouting)
+				end
+		end
 	end.
 
 
