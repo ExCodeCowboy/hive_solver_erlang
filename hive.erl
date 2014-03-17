@@ -1,13 +1,16 @@
 -module(hive).
 -export([start_hive/3]).
 
+-define(BeeLifetime, 200000).
+-define(NumActive, 40).
+-define(NumScouts, 20).
+-define(NumInactive, 10).
+-define(ActiveTime, 100).
+
+
 start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 	
-	BeeLifetime = 60,
-	NumActive = 30,
-	NumScouts = 20,
-	NumInactive = 10,
-	TotalBees = NumInactive + NumScouts + NumActive,
+	TotalBees = ?NumInactive + ?NumScouts + ?NumActive,
 
 	MyPid = self(),
 	CallBack = fun(Solution) ->
@@ -27,21 +30,29 @@ start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 
 	lists:map(
 		fun(A)->
+			Status = 
+				if A =< ?NumInactive ->
+					initializeInactive;
+				A =< ?NumInactive+?NumScouts ->
+					scouting;
+				true->
+					{active,?ActiveTime}
+				end,
 			BeeSol = RanSolFunc(),
 			spawn(
 				fun()->bee(HivePid,
 			     	BeeSol,
 			     	EvalFunc(BeeSol),
-				 	inactive,
+				 	Status,
 				 	NeighborFunc,
 				 	RanSolFunc,
 					EvalFunc,
-					BeeLifetime)
+					?BeeLifetime)
 				end) 
-		end,lists:seq(1, 100)),
+		end,lists:seq(1, TotalBees)),
 	receive
 		{solution,Solution}->
-			io:format("Finishing Hive run.")
+			io:format("Finishing Hive run. ~p is best solution",[Solution])
 	end.
 
 
@@ -70,11 +81,16 @@ run_hive(EvalFunc,
 
 		receive 
 			{newBest, BeePid, BeeBest, BeeBestScore} ->
-				if BeeBestScore > BestSolutionScore ->
-					%Notify the inactive bees
+				io:format("Bee ~p reports ~p as new personal best of ~p vs ~p ~n",
+					[BeePid,BeeBest, BeeBestScore,BestSolutionScore]),
 					lists:map(fun(I) ->
 						I ! {newBest,BeeBest,BeeBestScore}
 					end,queue:to_list(InactiveBees)),
+
+				if BeeBestScore >= BestSolutionScore ->
+					io:format("Saving ~p as new hive best of ~p ~n",
+						[BeeBest, BeeBestScore]),
+					%Notify the inactive bees
 					ShortCall(BeeBest,
 							  BeeBestScore,
 							  InactiveBees,
@@ -85,10 +101,18 @@ run_hive(EvalFunc,
 							  InactiveBees,
 							  LivingBees)
 				end;
+			{startLanded, BeePid} ->
+				io:format("Bee ~p starts landed ~n",[BeePid]),
+				ShortCall(BestSolution,
+					BestSolutionScore,
+					queue:in(BeePid,InactiveBees),
+					LivingBees);						
 			{comingHome, BeePid} ->
+				%io:format("Bee ~p lands ~n",[BeePid]),
 				case queue:out(InactiveBees) of
 					{{_,LeavingBeePid},RemainingInactive} ->
 						LeavingBeePid ! {forage},
+						%io:format("Bee ~p takes off ~n",[LeavingBeePid]),
 						ShortCall(BestSolution,
 								 BestSolutionScore,
 								 queue:in(BeePid,RemainingInactive),
@@ -103,12 +127,31 @@ run_hive(EvalFunc,
 				RemainingBees = LivingBees-1,
 				io:format("Bee ~p dies, ~p remaining ~n",[BeePid,RemainingBees]),
 				if RemainingBees > 0 ->
-						RemainingInactive = 
-							queue:filter(fun(I)-> I/=BeePid end,InactiveBees),
+						
+					RemainingInactive = 
+						queue:filter(fun(I)-> I/=BeePid end,InactiveBees),
+								
+					NumInactive = queue:len(RemainingInactive),
+					io:format("Current Idle bee count ~p ~n",[NumInactive]),
+
+					%if only inactive are left, release them.
+					if NumInactive*2 > RemainingBees ->
+						io:format("Releasing remaining idle bees ~n"),
+						lists:map(fun(I) ->
+							%io:format("Bee ~p takes off ~n",[I]),
+							I ! {forage}
+						end,queue:to_list(RemainingInactive)),
+						ShortCall(BestSolution,
+								  BestSolutionScore,
+								  queue:new(),
+								  RemainingBees);
+					true->
 						ShortCall(BestSolution,
 								  BestSolutionScore,
 								  RemainingInactive,
-								  RemainingBees);
+								  RemainingBees)
+					end;
+
 				true ->
 					CallBack(BestSolution)
 				end
@@ -141,11 +184,18 @@ bee(HivePid,
 		HivePid ! {dead,BeePid};
 	true ->
 		case State of
+			initializeInactive->
+				%signal the hive you are coming home
+				HivePid!{startLanded,BeePid},
+				%then go inactive
+				ShortCall(
+					BestSolution,
+					BestSolutionScore,
+					inactive);
 			{active,RemainingIterations}->
 				if RemainingIterations == 0 ->
-					%signal the hive you are coming home
-					HivePid!{comingHome,BeePid},
 					%then go inactive
+					HivePid!{comingHome,BeePid},
 					ShortCall(
 						BestSolution,
 						BestSolutionScore,
@@ -160,7 +210,7 @@ bee(HivePid,
 						HivePid!{newBest, BeePid, Neighbor, NeighborScore},
 						ShortCall(Neighbor,
 								  NeighborScore,
-								  {active,RemainingIterations-1});
+								  {active,?ActiveTime});
 					true->
 						ShortCall(BestSolution,
 								  BestSolutionScore,
@@ -172,12 +222,19 @@ bee(HivePid,
 					{forage}->
 						ShortCall(BestSolution,
 							BestSolutionScore,
-							{active,100});
+							{active,?ActiveTime});
 					{newBest,BeeBest,BeeBestScore}->
-						ShortCall(BeeBest,
-							BeeBestScore,
+						if BeeBestScore>BestSolutionScore ->
+							io:format("~p learned new best ~p ~n",[BeePid,BeeBest]),
+							ShortCall(BeeBest,
+								BeeBestScore,
+								inactive);
+						true->
+							ShortCall(BestSolution,
+							BestSolutionScore,
 							inactive)
-				after 500->
+					end
+				after 20->
 					ShortCall(BestSolution,
 							BestSolutionScore,
 							inactive)
