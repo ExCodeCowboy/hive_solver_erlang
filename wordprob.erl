@@ -1,5 +1,10 @@
 -module(wordprob).
--export([eval/0,ranSol/0,neighSol/0]).
+-export([eval/0,ranSol/0,neighSol/0,getProbDef/0]).
+-record(probDef, {evalFunc,ranSolFunc,neighborFunc}).
+
+
+getProbDef()->
+    #probDef{evalFunc=eval(),ranSolFunc=ranSol(),neighborFunc=neighSol()}.
 
 eval()->
 	fun(PossibleSolution)->

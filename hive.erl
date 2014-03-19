@@ -1,8 +1,10 @@
 -module(hive).
--export([start_hive/3]).
+-export([start_hive/1]).
+
+-record(probDef, {evalFunc,ranSolFunc,neighborFunc}).
 
 -define(BeeLifetime, 30000).
--define(NumActive, 500).
+-define(NumActive, 50).
 -define(NumScouts, 300).
 -define(NumInactive,150).
 -define(ActiveTime, 100).
@@ -10,7 +12,7 @@
 -define(WagglePersuation,70).
 
 
-start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
+start_hive(Prob) ->
 	
 	TotalBees = ?NumInactive + ?NumScouts + ?NumActive,
 
@@ -19,9 +21,7 @@ start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 		MyPid ! {solution,Solution}
 	end,
 
-	HiveStart =  fun() -> run_hive(EvalFunc,
-								   RanSolFunc,
-								   NeighborFunc,
+	HiveStart =  fun() -> run_hive(Prob,
 								   0,
 								   0,
 								   queue:new(),
@@ -40,7 +40,7 @@ start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 				true->
 					{active,?ActiveTime}
 				end,
-			BeeSol = RanSolFunc(),
+			BeeSol = (Prob#probDef.ranSolFunc)(),
 			spawn(
 				fun()->
 					random:seed(crypto:rand_uniform(1, 200000000),
@@ -48,11 +48,9 @@ start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 						crypto:rand_uniform(1, 200000000)),
 					bee(HivePid,
 			     	BeeSol,
-			     	EvalFunc(BeeSol),
+			     	(Prob#probDef.evalFunc)(BeeSol),
 				 	Status,
-				 	NeighborFunc,
-				 	RanSolFunc,
-					EvalFunc,
+				 	Prob,
 					?BeeLifetime)
 				end) 
 		end,lists:seq(1, TotalBees)),
@@ -62,9 +60,7 @@ start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 	end.
 
 
-run_hive(EvalFunc,
-		 RanSolFunc,
-		 NeighborFunc,
+run_hive(Prob,
 		 BestSolution,
 		 BestSolutionScore,
 		 InactiveBees,
@@ -75,9 +71,7 @@ run_hive(EvalFunc,
 						BestSolutionScore_S,
 						InactiveBees_S,
 						LivingBees_S)->
-			run_hive(EvalFunc,
-					 RanSolFunc,
-					 NeighborFunc,
+			run_hive(Prob,
 					 BestSolution_S,
 					 BestSolutionScore_S,
 		 			 InactiveBees_S,
@@ -168,9 +162,7 @@ bee(HivePid,
 	BestSolution,
 	BestSolutionScore,
 	State,
-	NeighborFunc,
-	RanSolFunc,
-	EvalFunc,
+	Prob,
 	LifeTime) ->
 		ShortCall = fun(BestSolution_S,
 						BestSolutionScore_S,
@@ -179,9 +171,7 @@ bee(HivePid,
 				BestSolution_S,
 				BestSolutionScore_S,
 				State_S,
-				NeighborFunc,
-				RanSolFunc,
-				EvalFunc,
+				Prob,
 				LifeTime-1)
 		end,
 	
@@ -209,8 +199,8 @@ bee(HivePid,
 						inactive);
 				true->
 					%try neighboor
-					Neighbor = NeighborFunc(BestSolution),
-					NeighborScore = EvalFunc(Neighbor),
+					Neighbor = (Prob#probDef.neighborFunc)(BestSolution),
+					NeighborScore = (Prob#probDef.evalFunc)(Neighbor),
 					%if neghbor is better
 					BetterChoice = fuzzy_choice(NeighborScore>BestSolutionScore),
 					if BetterChoice ->
@@ -251,8 +241,8 @@ bee(HivePid,
 				end;
 			scouting->
 				%try neighboor
-				RanSol = RanSolFunc(),
-				RanSolScore = EvalFunc(RanSol),
+				RanSol = (Prob#probDef.ranSolFunc)(),
+				RanSolScore = (Prob#probDef.evalFunc)(RanSol),
 				%if neghbor is better
 				BetterChoice = fuzzy_choice(RanSolScore>BestSolutionScore),
 				if BetterChoice ->

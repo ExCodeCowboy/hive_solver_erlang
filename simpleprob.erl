@@ -1,6 +1,11 @@
 -module(simpleprob).
--export([eval/0,ranSol/0,neighSol/0]).
+-export([eval/0,ranSol/0,neighSol/0,getProbDef/0]).
+-record(probDef, {evalFunc,ranSolFunc,neighborFunc}).
 
+
+getProbDef()->
+    #probDef{evalFunc=eval(),ranSolFunc=ranSol(),neighborFunc=neighSol()}.
+    
 eval()->
 	fun(PossibleSolution)->
 		math:pow(10,-(math:pow(PossibleSolution-746500,2)/8000000))
