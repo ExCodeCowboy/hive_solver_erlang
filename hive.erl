@@ -2,11 +2,15 @@
 -export([start_hive/1]).
 
 -record(probDef, {evalFunc,ranSolFunc,neighborFunc}).
+-record(hiveState,{bestSolution=0,
+				   bestSolutionScore=0,
+				   inactiveBees=queue:new(),
+				   livingBees}).
 
 -define(BeeLifetime, 30000).
 -define(NumActive, 50).
--define(NumScouts, 300).
--define(NumInactive,150).
+-define(NumScouts, 30).
+-define(NumInactive,15).
 -define(ActiveTime, 100).
 -define(Accuracy,95).
 -define(WagglePersuation,70).
@@ -21,11 +25,8 @@ start_hive(Prob) ->
 		MyPid ! {solution,Solution}
 	end,
 
-	HiveStart =  fun() -> run_hive(Prob,
-								   0,
-								   0,
-								   queue:new(),
-								   TotalBees,
+	HiveStart =  fun() -> run_hive(#hiveState{
+								   livingBees=TotalBees},
 								   CallBack) end, 
 
 	HivePid = spawn(HiveStart),
@@ -60,24 +61,8 @@ start_hive(Prob) ->
 	end.
 
 
-run_hive(Prob,
-		 BestSolution,
-		 BestSolutionScore,
-		 InactiveBees,
-		 LivingBees,
+run_hive(State,
 		 CallBack)->
-		
-		ShortCall = fun(BestSolution_S,
-						BestSolutionScore_S,
-						InactiveBees_S,
-						LivingBees_S)->
-			run_hive(Prob,
-					 BestSolution_S,
-					 BestSolutionScore_S,
-		 			 InactiveBees_S,
-					 LivingBees_S,
-					 CallBack)
-		end,
 
 		receive 
 			{newBest, BeePid, BeeBest, BeeBestScore} ->
@@ -85,52 +70,46 @@ run_hive(Prob,
 				%	[BeePid,BeeBest, BeeBestScore,BestSolutionScore]),
 					lists:map(fun(I) ->
 						I ! {newBest,BeeBest,BeeBestScore}
-					end,queue:to_list(InactiveBees)),
+					end,queue:to_list(State#hiveState.inactiveBees)),
 
-				if BeeBestScore >= BestSolutionScore ->
+				if BeeBestScore >= State#hiveState.bestSolutionScore ->
 					io:format("Saving ~p as new hive best of ~p ~n",
 						[BeeBest, BeeBestScore]),
 					%Notify the inactive bees
-					ShortCall(BeeBest,
-							  BeeBestScore,
-							  InactiveBees,
-							  LivingBees);
+					run_hive(State#hiveState{
+						bestSolution=BeeBest,
+						bestSolutionScore=BeeBestScore},
+						CallBack);
 				true->
-					ShortCall(BestSolution,
-							  BestSolutionScore,
-							  InactiveBees,
-							  LivingBees)
+					run_hive(State,CallBack)
 				end;
 			{startLanded, BeePid} ->
 				io:format("Bee ~p starts landed ~n",[BeePid]),
-				ShortCall(BestSolution,
-					BestSolutionScore,
-					queue:in(BeePid,InactiveBees),
-					LivingBees);						
+				run_hive(State#hiveState{
+						inactiveBees=queue:in(BeePid,State#hiveState.inactiveBees)},
+						CallBack);						
 			{comingHome, BeePid} ->
 				%io:format("Bee ~p lands ~n",[BeePid]),
-				case queue:out(InactiveBees) of
+				case queue:out(State#hiveState.inactiveBees) of
 					{{_,LeavingBeePid},RemainingInactive} ->
 						LeavingBeePid ! {forage},
 						%io:format("Bee ~p takes off ~n",[LeavingBeePid]),
-						ShortCall(BestSolution,
-								 BestSolutionScore,
-								 queue:in(BeePid,RemainingInactive),
-								 LivingBees);						
+						run_hive(State#hiveState{
+							inactiveBees=queue:in(BeePid,RemainingInactive)},
+							CallBack);						
 					{empty,RemainingInactive} ->
 						BeePid ! {forage},
-						ShortCall(BestSolution,
-								 BestSolutionScore,
-								 RemainingInactive,
-								 LivingBees)
+						run_hive(State#hiveState{
+							inactiveBees=RemainingInactive},
+							CallBack)
 				end;
 			{dead,BeePid} ->
-				RemainingBees = LivingBees-1,
+				RemainingBees = State#hiveState.livingBees-1,
 				io:format("Bee ~p dies, ~p remaining ~n",[BeePid,RemainingBees]),
 				if RemainingBees > 0 ->
 						
 					RemainingInactive = 
-						queue:filter(fun(I)-> I/=BeePid end,InactiveBees),
+						queue:filter(fun(I)-> I/=BeePid end,State#hiveState.inactiveBees),
 								
 					NumInactive = queue:len(RemainingInactive),
 					io:format("Current Idle bee count ~p ~n",[NumInactive]),
@@ -142,19 +121,19 @@ run_hive(Prob,
 							%io:format("Bee ~p takes off ~n",[I]),
 							I ! {forage}
 						end,queue:to_list(RemainingInactive)),
-						ShortCall(BestSolution,
-								  BestSolutionScore,
-								  queue:new(),
-								  RemainingBees);
+						run_hive(State#hiveState{
+						inactiveBees=queue:new(),
+						livingBees=RemainingBees},
+						CallBack);	
 					true->
-						ShortCall(BestSolution,
-								  BestSolutionScore,
-								  RemainingInactive,
-								  RemainingBees)
+						run_hive(State#hiveState{
+							inactiveBees=RemainingInactive,
+							livingBees=RemainingBees},
+							CallBack)
 					end;
 
 				true ->
-					CallBack(BestSolution)
+					CallBack(State#hiveState.bestSolution)
 				end
 		end.
 
