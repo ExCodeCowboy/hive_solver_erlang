@@ -4,17 +4,18 @@
 eval()->
 	fun(PossibleSolution)->
         
-        RealSolution = "THISISHARDERTHANITLOOKS",
+        RealSolution = "THISISTHESOLUTIONSTRING",
         Distance = lists:foldl(fun(X,A)-> X+A end, 0, lists:zipwith(fun(X,Y)->
         	if (X == Y)->
         		0;
         	true->
-        		1
+        		Dif = X - Y,
+        		abs(Dif)
         	end
         end, RealSolution, PossibleSolution)),
         %io:format("~p to ~p (Distance ~p)~n",[PossibleSolution,RealSolution,Distance]),
 				
-        23-Distance
+        1/(1+Distance)
 	end.
 
 ranSol()->
@@ -25,8 +26,9 @@ ranSol()->
 neighSol()->
 	fun(N)->
 		Pos = random:uniform(length(N)),
-		{Pre,[_|Tail]} = lists:split(Pos-1,N),
-		Pre ++ [get_random_string(1)|Tail]
+		Increment = (random:uniform(3)-2),
+		{Pre,[Selected|Tail]} = lists:split(Pos-1,N),
+		Pre ++ [(Selected+Increment)|Tail]
 	end.
 
 

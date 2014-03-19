@@ -1,11 +1,13 @@
 -module(hive).
 -export([start_hive/3]).
 
--define(BeeLifetime, 200000).
--define(NumActive, 40).
--define(NumScouts, 20).
--define(NumInactive, 10).
+-define(BeeLifetime, 30000).
+-define(NumActive, 500).
+-define(NumScouts, 300).
+-define(NumInactive,150).
 -define(ActiveTime, 100).
+-define(Accuracy,95).
+-define(WagglePersuation,70).
 
 
 start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
@@ -40,7 +42,11 @@ start_hive(EvalFunc,RanSolFunc,NeighborFunc) ->
 				end,
 			BeeSol = RanSolFunc(),
 			spawn(
-				fun()->bee(HivePid,
+				fun()->
+					random:seed(crypto:rand_uniform(1, 200000000),
+						crypto:rand_uniform(1, 200000000),
+						crypto:rand_uniform(1, 200000000)),
+					bee(HivePid,
 			     	BeeSol,
 			     	EvalFunc(BeeSol),
 				 	Status,
@@ -81,8 +87,8 @@ run_hive(EvalFunc,
 
 		receive 
 			{newBest, BeePid, BeeBest, BeeBestScore} ->
-				io:format("Bee ~p reports ~p as new personal best of ~p vs ~p ~n",
-					[BeePid,BeeBest, BeeBestScore,BestSolutionScore]),
+				%io:format("Bee ~p reports ~p as new personal best of ~p vs ~p ~n",
+				%	[BeePid,BeeBest, BeeBestScore,BestSolutionScore]),
 					lists:map(fun(I) ->
 						I ! {newBest,BeeBest,BeeBestScore}
 					end,queue:to_list(InactiveBees)),
@@ -118,9 +124,10 @@ run_hive(EvalFunc,
 								 queue:in(BeePid,RemainingInactive),
 								 LivingBees);						
 					{empty,RemainingInactive} ->
+						BeePid ! {forage},
 						ShortCall(BestSolution,
 								 BestSolutionScore,
-								 queue:in(BeePid,RemainingInactive),
+								 RemainingInactive,
 								 LivingBees)
 				end;
 			{dead,BeePid} ->
@@ -205,12 +212,13 @@ bee(HivePid,
 					Neighbor = NeighborFunc(BestSolution),
 					NeighborScore = EvalFunc(Neighbor),
 					%if neghbor is better
-					if NeighborScore>BestSolutionScore->
+					BetterChoice = fuzzy_choice(NeighborScore>BestSolutionScore),
+					if BetterChoice ->
 						%need to insert possible mistakes that bee makes
 						HivePid!{newBest, BeePid, Neighbor, NeighborScore},
 						ShortCall(Neighbor,
 								  NeighborScore,
-								  {active,?ActiveTime});
+								  {active,RemainingIterations});
 					true->
 						ShortCall(BestSolution,
 								  BestSolutionScore,
@@ -224,7 +232,9 @@ bee(HivePid,
 							BestSolutionScore,
 							{active,?ActiveTime});
 					{newBest,BeeBest,BeeBestScore}->
-						if BeeBestScore>BestSolutionScore ->
+						Persuaded = ?WagglePersuation =< random:uniform(100),
+						BetterChoice = BeeBestScore>BestSolutionScore,
+						if BetterChoice and Persuaded ->
 							io:format("~p learned new best ~p ~n",[BeePid,BeeBest]),
 							ShortCall(BeeBest,
 								BeeBestScore,
@@ -234,7 +244,7 @@ bee(HivePid,
 							BestSolutionScore,
 							inactive)
 					end
-				after 20->
+				after 50->
 					ShortCall(BestSolution,
 							BestSolutionScore,
 							inactive)
@@ -244,7 +254,8 @@ bee(HivePid,
 				RanSol = RanSolFunc(),
 				RanSolScore = EvalFunc(RanSol),
 				%if neghbor is better
-				if RanSolScore>BestSolutionScore->
+				BetterChoice = fuzzy_choice(RanSolScore>BestSolutionScore),
+				if BetterChoice ->
 					%need to insert possible mistakes that bee makes
 					HivePid!{newBest, BeePid, RanSol, RanSolScore},
 					ShortCall(RanSol,
@@ -256,6 +267,16 @@ bee(HivePid,
 							  scouting)
 				end
 		end
+	end.
+
+
+fuzzy_choice(Truth)->
+	Chance = random:uniform(100),
+	if Chance > ?Accuracy -> 
+		%io:format("Bee ~p made a mistake. ~n",[self()]),
+		not Truth;
+	true->
+		Truth
 	end.
 
 
