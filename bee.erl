@@ -1,7 +1,7 @@
 -module(bee).
 -export([start_bee/4]).
 
--define(ActiveTime, 100).
+-define(ActiveTime, 1000).
 -define(Accuracy,95).
 -define(WagglePersuation,70).
 
